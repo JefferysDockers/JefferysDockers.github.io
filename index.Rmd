@@ -1,0 +1,16 @@
+---
+title: "About Jefferys' Dockers"
+author: "Stuart R. Jefferys"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+documentclass: book
+biblio-style: apalike
+link-citations: yes
+github-repo: JefferysDockers/JefferysDockers.github.io
+url: 'https\://jefferysdockers.github.io/'
+description: "The BookDown website for the Dockers hosted at Jefferys/JefferysDockers on GitHub."
+---
+
+# JefferysDockers {-}
+
+An overview of the Dockers available from Jefferys/JefferysDockers, including the labeling schema and a description of the development goals and build decisions.

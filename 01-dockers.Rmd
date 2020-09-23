@@ -1,0 +1,7 @@
+# Dockers
+
+## Base Dockers
+
+### ubu-lts - Ubuntu Long Term Support Release
+
+A from scratch build of a minimal Ubuntu OS using a tarball of the core Ubuntu distro. This is a big repo due to the tarball, and will get bigger with each Ubuntu version upgrade. Best to do a `git clone --depth 1` to avoid downloading all the old tarballs too.

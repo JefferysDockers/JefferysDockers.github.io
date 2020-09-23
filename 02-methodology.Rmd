@@ -1,0 +1,5 @@
+# Build methodology
+
+A description of the process and conventions used to build the Docker images and publish them.
+
+[TODO Work on this.]

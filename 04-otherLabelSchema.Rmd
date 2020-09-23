@@ -1,0 +1,403 @@
+# Other Label Schemas
+
+## Open Containers Standard
+
+The standard is specified here: https://github.com/opencontainers/image-spec/blob/master/annotations.md
+
+### Labels
+
+Labels are components of a <key> = <value> map, where keys and values are strings
+
+### Keys
+
+Keys should be qualified by prefixing with reverse domain names to ensure uniqueness. Keys or prefixes matching org.opencontainers.* and org.opencontainers.image.* are reserved by the specification and only have the meanings defined therein.
+
+[SRJ: Nothing says that keys can't contain spaces and weird characters. Is that true? I bet not.]
+
+Anything reading labels should handle unknown keys without error.
+
+### Values
+
+All values must be strings and there must be a value if a key is defined (it may be "", the empty string).
+
+### Pre-defined keys
+
+<ul>
+  <li><details>
+    <summary>**`org.opencontainers.image.created`** - The date and time the image was created. [`...`]</summary>
+
+This must be a string formatted in accordance with RFC 3339. For example:
+
+        "2020-09-12T00:23:06-04:00"
+
+or
+
+        "2020-09-12 00:23:06-04:00"
+
+One way to get such a string portably, including apple's OS X, is as follows. (Most of the complexity is to get the colon into the time zone offset:)
+
+~~~{class="bash"}
+imageCreated="$(date +"%Y-%m-%dT%H:%M:%S%z")"
+insertAfterPos=$(( ${#imageCreated} - 2 ))
+imageCreated="${imageCreated:0:insertAfterPos}:${imageCreated:insertAfterPos}"
+~~~
+
+Note that adding this into the container will break caching for any following steps as this will never be the same for two successive builds.
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.authors`** - The contact details of the people or organization responsible for the image. [`...`]</summary>
+
+This is a free-form string, so users should really define their own more constrained label, and copy its contents to this label.
+
+One common format for an authors string might look like:
+
+        org.opencontainers.image.authors = "bob <bob@nowhere.com>; mary<mary@here.com> ; this is ok too < good@good.net >; <alsoOk@my.edu>"
+
+syntax Element | structure
+---------------|----------
+authorsString  | contact [[; contact]
+contact        |  [[ name ] \< emailAddress \>
+name           | Any character sequence, possibly with internal spaces, but not "<" characters or newlines. Leading and trailing spaces are stripped. If not present, emailAddress will be used as name.
+emailAddress   | Any valid email address, possibly with the exception of not allowing a ">" character. Leading and trailing spaces are stripped. May not be empty
+
+Parsing a contact after a split on ";" can then be done with a regexp like:
+
+        \s*(.*?)\s*[<]\s*(.+?)\s*[>]\s*
+
+Where the first capture group grabs the name (if present) and the second grabs the emailAddress. It ignores leading and trailing spaces both on the contact as a whole and on the name and emailAddress section [SRJ: How efficient is this? Do the non-greedy capture groups require a lot of back-off re-testing?]
+
+If `name` is empty, it should be set to `emailAddress`.
+</details></li>
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.url`** - URL to get information about the image from. [`...`]</summary>
+
+[SRJ: I'm assuming this is a link to the image "home" as much as that is possible]. I would like it to be the URL to download an image from, but that seems not to be what this is and there is no such thing in the list]
+
+This is, for example, the DockerHub URL for the container. 
+
+        org.opencontainers.image.url="https://hub.docker.com/repository/docker/jefferys/ubu-lts"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.documentation`** - URL to get documentation on the image. [`...`]</summary>
+
+[SRJ: It is not that obvious what "org.opencontainers.image.url" is, given this exists. The only thing I can think is that the url WAS supposed to be where the image is downloaded from, and THIS is supposed to be a link to the home. But if not then maybe the image home does not provide obvious links to documentation about the image, or maybe there are separate summary and detailed documentation for the image. Otherwise this is just the same as org.opencontainers.image.url.]
+
+For example, the DockerHub URL for the container, or a link to the readme in the source repository the image is build from.
+
+        org.opencontainers.image.url="https://hub.docker.com/repository/docker/jefferys/ubu-lts"
+
+or
+
+        org.opencontainers.image.url="https://github.com/JefferysDockers/ubu-lts/README.md"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.source`** - URL to get the source code for building the image. [`...`]</summary>
+
+This is, for example, the GitHub URL for a repo containing the context and the Dockerfile. It might be a sub-directory within the repo, in which case this URL should point to that.
+
+If any parameters are needed to build the container, or any special pre-processing is needed, that should be documented in a README or README.md alongside the Dockerfile, or in the Dockerfile itself. [SRJ- there should be a label for a URL to point to this, as the BUILD documentation is separate from the USER documentation.]
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.version`** - Version of the packaged software. [`...`]</summary>
+
+This is the version of the tool that is being packaged in the repository. It is conventional to have a tag for the image that has two parts, tool version and build version, separated by a "-". This is the tool version.
+
+Note that even when the image tag used for accessing an image is "latest", or something similar, the actual version of the image downloaded should be the value of this. It would be hard to do otherwise.
+
+For example, if tagging a base container providing version 20.04.01 of Ubuntu, built with version 0.0.3 of the build software, the tag would be 20.04.01-0.0.3 and this label would be:
+
+        org.opencontainers.image.version="20.0.4"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.revision`** - Source control revision identifier for the packaged software. [`...`]</summary>
+
+This is the version of the source code repository that contains the build context and a Dockerfile for building a container. It is conventional to have a tag for the image that has two parts, tool version and build version, separated by a "-". This is the build version.
+
+For example, if tagging a base container providing version 20.04.01 of Ubuntu, built with version 0.0.3 of the build software, the tag would be 20.04.01-0.0.3 and this label would be:
+
+        org.opencontainers.image.revision="0.0.3"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.vendor`** - Name of the distributing entity, organization or individual. [`...`]</summary>
+
+This could be the owner of the DockerHub repo or the GitHub repo, but since those might be different and this is not explicit, this only refers to an abstract "owner" that is producing the image and making it available. This is not the maintainer.
+
+For example, a base image container for Ubuntu might have:
+
+    org.opencontainers.image.vendor="Cannonical"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.licenses`** - License(s) under which contained software is distributed as an SPDX License Expression. [`...`]</summary>
+
+This is not supposed to be the license of the source repository used to build the image, but is transitive from the packaged "tool".
+
+Unfortunately, this is problematic as main part of the image is actually the composite OS from the base (or directly for base images) that do not have simple licenses. This makes this close to useless for anything except closed source private containers. In which case there is likely no difference in license between the container and the source repo.
+
+Specifying the terms under which all the software in the image, and hence the image itself can be distributed is too complex. Given that, I'm using this to mean the license of the SOURCE repo that built the container.
+
+Common ones are:
+
+* SPDX:Apache-2.0
+* SPDX:GPL-2.0-or-later
+* SPDX:GPL-3.0-only
+* SPDX:MIT
+
+For example
+
+    org.opencontainers.image.licenses="SPDX:MIT"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.ref.name`** - Name of the reference for a target (string). [`...`]</summary>
+
+The source information for this is very confusing, and seems to indicate this is supposed to be the "tag" for an image, not any of the rest of the name. But the description below is much more extensive. So it looks like this is supposed to be the complete unique name by which this image is known.
+
+Since image names are not namespaced except by "/" separated components of the their name, a registry path is needed to do this correctly. But this will not fix that, this will just be the full name without a url. Too bad in this day and age the registry is not part of the standard to allow complete automated pulling of the image.
+
+Formal definition of this element is provided here: https://github.com/opencontainers/image-spec/blob/master/annotations.md#pre-defined-annotation-keys
+
+Example:
+
+    org.opencontainers.image.ref.name="jefferys/ubu-lts:20.04.01-0.0.3"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.title`** - Human-readable title of the image (string) [`...`]</summary>
+
+This should be a one-line description, preferably 80 characters or less.
+
+Example:
+
+    org.opencontainers.image.title="ubu-lts - Base OS docker derived from Ubuntu."
+
+  </details></li>
+  <li><details>
+
+  <summary>**`org.opencontainers.image.description`** - Human-readable description of the software packaged in the image (string) [`...`]</summary>
+
+This can be a multi-line-string, but it is subject to Dockerfile string parsing rules and leading spaces or tabs are literally included and can't be used for "pretty" layout in the file.
+
+Example:
+
+    LABEL org.opencontainers.image.description="Based on Ubuntu this is a completely local build of a base Docker from scratch."
+
+  </details></li>
+</ul>
+
+## Biocontainers Standard
+
+https://github.com/BioContainers/specs/blob/master/container-specs.md
+
+To comply with this standard, all required labels must be provided.
+
+Many of these overlap with the org.opencontainers.image standard, but are not namespaced names as those are. These have to be provided with duplicate values. It would be nice if this was synced with that and used a "pro.biocontainers." prefix for these labels.
+
+### Pre-defined keys (required):
+
+<ul>
+  <li><details>
+
+  <summary>**`base_image`** - The original image where the software has been built. [...]</summary>
+
+Conflicting examples. In one example it includes the tag but not the "group/" part of the name. In another example, this includes the group part, but does not include the tag. It should include both, and hence meets my re-definition of "ref.name", but for the base image.
+
+If there is no base image, what this should be is not clear. I'm assuming it can either be the empty string "", or "scratch".
+
+Example:
+
+        LABEL base_image="biodckr/biodocker:latest"
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+  </details></li>
+  <li><details>
+
+  <summary>**`version`** - Version of the images Dockerfile. [...]</summary>
+
+This is the source repository version, usually the second part of a two part tag.
+
+Example
+
+        LABEL version="0.0.3"
+
+Equivalent org.opencontainers.image tag:
+
+        org.opencontainers.image.revision="0.0.3"
+
+  </details></li>
+  <li><details>
+
+  <summary> **`software.version`** - Version of the software or tool. [...]</summary>
+
+This is the version of the packaged tool, usually the first part of a two-part tag.
+
+Example:
+
+        LABEL software.version="2020.04.1
+
+Equivalent org.opencontainers.image tag:
+
+        org.opencontainers.image.version="20.0.4"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`software`** - Name of the software or tool. [...]</summary>
+
+The packaged software or tool. This is usually the basename of the image, without the "group" components
+
+Example:
+
+        software="ubu-lts"
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+  </details></li>
+  <li><details>
+
+  <summary>**`about.summary`** - A short description of the software or tool. [...]</summary>
+
+Not clear if this can container newlines, but assuming that is ok, so that makes it similar to the 
+
+Example:
+
+        LABEL about.summary="Based on Ubuntu this is a completely local build of a base Docker from scratch."
+
+Equivalent org.opencontainers.image tag:
+
+        org.opencontainers.image.description="Based on Ubuntu this is a completely local build of a base Docker from scratch."
+
+  </details></li>
+  <li><details>
+
+  <summary>**`about.home`** - The original software website. [...]</summary>
+
+Unlike org.opencontainers.image.documentation, this is intended to be documentation for the packaged tool, not the image.
+
+Example:
+
+        about.home="https://wiki.ubuntu.com/Base"
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+  </details></li>
+  <li><details>
+
+  <summary>**`about.license`** - SPDX license specification. [...]</summary>
+
+If a license not in the SPDX list is used, specify the URL in license_file.
+
+Example:
+
+        about.license="SPDX:MIT"
+
+Equivalent org.opencontainers.image tag:
+
+        org.opencontainers.image.licenses="SPDX:MIT"
+
+  </details></li>
+  <li><details>
+
+  <summary>**`maintainer`** The image maintainer. [...]</summary>
+
+Note that the specification actually usually the MAINTAINER instruction, not a LABEL, but this is deprecated in DOCKERFILES and should not be used. And to be clear, this is the image maintainer, not the maintainer of the source the image is build from, although that is probably the same...
+
+The format of this is not specified, but should be a single email contact if possible.
+
+Example:
+
+        LABEL maintainer="bob <bob@nowhere.com>"
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+</details></ul>
+
+### Pre-defined keys (optional):
+
+<ul><details>
+
+<summary>**`about.documentation`** - URL(s) with information on the software tool. [...]</summary>
+
+This is a link to documentation on the packaged tool. It is likely good enough just to have the home, but the documentation may be version specific, so a version specific link to documentation is probably a good idea.
+
+Example:
+
+        None Given
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+  </details></li>
+  <li><details>
+
+  <summary>**`about.license_file`** - License path location in the container or url. [...]</summary>
+
+This is not optional if no SPDX license is specified.
+
+Example:
+
+        (None Given)
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+  </details></li>
+  <li><details>
+
+  <summary>**`about.tags=`** Keywords that help to find and classify the software tool. [...]</summary>
+
+This is formatted as a comma separated strings, possibly including spaces.
+
+Example:
+
+        LABEL about.tags="proteomics, mass spectrometry, biocontainers"
+
+Equivalent org.opencontainers.image tag:
+
+        None
+
+  </details></li>
+  <li><details>
+
+  <summary>**`extra.identifiers.*`** - Specify additional labels not in the biocontainers specification. [...]</summary>
+
+Extra identifiers are external identifiers in other resources that will allow to pull metadata, an external information from other resources (e.g biotools). In order to be compatible with Docker specification the domain (database) of the identifiers should be specified in the name of the label.
+
+Example:
+
+        LABEL extra.identifiers.biotools=abyss
+
+Equivalent org.opencontainers.image tag:
+
+        None: All tags are user namespaced, so no need for a defined special tag prefix.
+
+  </details></ul>

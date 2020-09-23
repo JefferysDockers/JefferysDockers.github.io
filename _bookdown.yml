@@ -1,0 +1,4 @@
+book_filename: "JefferysDockers.github.io"
+delete_merged_file: true
+output_dir: docs
+repo: https://github.com/JefferysDockers/JefferysDockers.github.io

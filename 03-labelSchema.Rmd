@@ -1,0 +1,277 @@
+# Label Schema
+
+*Note:* I'm only considering labels on images built from Dockerfiles, not images modified interactively and then saved and shared.
+
+## The LABEL instruction
+
+The goal of the `LABEL` Dockerfile instruction is to specify metadata as key="value" entries that can be inspected, e.g. with `docker info <imageName>`. Labels can also be added at build time by using the `docker build --label "key=value"` option.
+
+*Note:* Adding a label at build time could break the build cache, but it is implemented smartly; labels are added at the end of the build, so if a new or different label is added to a previously-run build command, everything is preserved except for the final step. Even the "add labels" step is cached and reused if the build command uses the same labels [SRJ in the same order?].
+
+## Image label standards
+
+There are more than one labeling standard, none of which are complete. So I just use them for source info on what kinds of labels I want. My notes on them follow in the sections [Open Containers Standard]{open-containers-standard} and [Biocontainers Standard](biocontainers standard)
+
+What's missing is that metadata needs to be inherited in a hierarchy, not flat. Flat means values inherited from parents are lost when a child declares a label of the same name, and if a child does not define a label the parent does, it is inherited with no indication of where it came from - e.g. the email of the maintainer.
+
+To add this without changing how docker formats labels is the trick. It requires every *image* to have its own unique namespace prefix that is used as a prefix for all its labels. Then each (reverse-domain-name prefixed) label inherited is preserved and associate with a specific parent image.
+
+## Better heritable tags
+
+### Adding image namespaces.
+
+The reverse-domain name of the image hosting site provides an ideal unique name, when combined with the image name (with "/" replaced by "."). Since `com.dockerhub.*` is reserved, docker-hub hosted images have only the name. For a quick example:
+
+A `io.github.JefferysDockers.pull` label is intended to hold the exact syntax needed to pull an image in a docker pull statement. If the image to be labeled is hosted at DockerHub in a repository named `jefferys/ubu-lts`, the label can be added either in the Dockerfile using the `LABEL` command or on the build command line using the `--label` option. In the Dockerfile this would look like
+
+        LABEL jefferys.ubu-lts.io.github.JefferysDockers.pull="jefferys/ubu-lts:20.04.01-0.0.1"
+    
+On the docker build command line it would look like
+
+        docker build --label "jefferys.ubu-lts.io.github.JefferysDockers.pull=jefferys/ubu-lts:20.04.01-0.0.1"
+
+In general no image will have a different version of itself as its base (or as any base, recursively), so tags are not used to identify images uniquely. If necessary in some specific instance they could always be used.
+
+### Specifying the image hierarchy
+
+In order to tell which tag goes with which inherited image, and which is from the current, a special (prefixed) label: `io.github.JefferysDockers.base-prefix` must be included that identifies the prefix the parent uses. An image defined from scratch has `base-prefix="scratch"`. If the parent does not conform to this labeling schema, `base-prefix=""`, the empty string.
+
+When the recursive chain of images all conform, the chain of images can be recreated by parsing all base-prefix labels. The base-prefix label whose base prefix is not specified by any base-prefix is then the most recent. For example a scratch image `ubu-lts` providing an Ubuntu OS could define:
+
+        LABEL jefferys.ubu-lts.io.github.JefferysDockers.base-prefix="scratch"
+
+An image `r-lang` that provided the R programming environment that used "ubu-lts" as its base image could define
+
+        LABEL jefferys.r-lang.io.github.JefferysDockers.base-prefix="jefferys.ubu-lts"
+
+The `r-lang` image will inherit the labels from its base, and since the prefix of the `base-prefix` label differs, both the parent's and the child's labels are present.
+
+Adding third "application" image that provided an R programming framework called `my-app` that had `r-lang` as its base could define:
+
+        LABEL jefferys.my-app.io.github.JefferysDockers.base-prefix="jefferys.r-lang"
+
+Its image will inherit its base image labels, which inherits its own base's image labels, etc. So the labels on the image `my-app` include all three `base-prefix` label variants:
+
+        jefferys.ubu-lts.io.github.JefferysDockers.base-prefix="scratch"
+        jefferys.r-lang.io.github.JefferysDockers.base-prefix="jefferys.ubu-lts"
+        jefferys.my-app.io.github.JefferysDockers.base-prefix="jefferys.r-lang"
+
+### Parsing the image chain
+
+Parsing the image prefix from each `io.github.JefferysDockers.base-prefix` label and associating it with the label value allows reconstructing the chain of images and identifies the current image:
+
+`jefferys.ubu-lts` had base `scratch`
+`jefferys.r-lang`  had base `jefferys.ubu-lts`
+`jefferys.my-app`  had base `jefferys.r-lang`
+
+As `jefferys.my-app` appeared in no base-prefix label, it is the current image.
+
+If we know that all images in the image chain are labeled to conform with this `io.github.JefferysDockers` standard, then this is all we need. However, it is likely that some image or images in the chain will be non-conforming and labeled in some other way. If a non-conforming image is used anywhere in the chain of images, as the labels on the current image are inherited from all parents, the current image will be non-confirming. It will then not be possible to determine where its labels or the labels it inherits came from. Although that is no different then the current default situation with labels, we would need to be able to detect non-conforming images, and it would be nice to use the labels from any images that do conform.
+
+It is always possible to identify a conforming "scratch" base image and a continuous chain of images up to a non-conforming one. But it is not possible to determine if the current image is conforming inspecting "base-prefix" labels on the image. If the current image declares no labels, it will not be detected even if all the other images in the chain are conforming.
+
+### Verifying the last image in the chain
+
+Unfortunately there seems no way to identify the current image as a conforming image using just the `docker inspect` command. It is not possible to specify a label that is not inherited, and if it were possible to identify which image in a chain of images a particular label came from, there would be little need for this schema. But there is another tool available to examine images, the `docker history` command.
+
+The `docker history` command provides information on each build step used to generate an image, including the steps used to build its base image, and its base's base image, recursively. But although it lists the steps in order, it does not identify which image a step came from - the line between the steps in an image and in its base is not preserved. If it was, we could just use the history information instead of label prefixes to identify what image a label was specified for. But we do have an ordering, so we can tell which is the last step, which must come from the last image. If we can identify the last step as a step the builds a conforming image, we know the current image is conforming and can trace all the labels back to the first non-conforming image.
+
+To ensure the current image is detectable as a conforming image, we specify that the last instructions in the image history must be one or more LABEL instructions, and one of the labels set must be (an image namespace prefixed) "io.github.JefferysDockers.label-schema-version" label. When searching backwards through the output of the docker history command, if anything other than a LABEL instruction is encountered before the required "io.github.JefferysDockers.label-schema-version" label, the current image is non-conforming. Docker generally alphabetizes the label instructions based on the label name, so always need to look through the set of all label instruction at the end of the file, not just the last one. (The label keys are also alphabetized in the in the results from inspecting the image.)
+
+### An example of parsing an image chain from labels
+
+For example, an image might contains the labels:
+
+        jefferys.my-app.io.github.JefferysDockers.base-prefix=""
+        jefferys.my-app.io.github.JefferysDockers.label-schema-version="0.0.2"
+        jefferys.ubu-lts.io.github.JefferysDockers.base-prefix="scratch"
+        jefferys.ubu-lts.io.github.JefferysDockers.label-schema-version="0.0.1"
+
+And the most recent command indicated in history output is 
+
+        LABEL jefferys.my-app.io.github.JefferysDockers.label-schema-version="0.0.2"
+
+This can then be parsed forwards from the scratch image, which is a conforming image and has labels with prefix `jefferys.ubu-lts`. There is at least one non-conforming image in the image chain as the image that used `ubu-lts` as its base is not identifiable.
+
+It can also be parsed backwards from the current image, which is a conforming image and has labels with the prefix `"jefferys.my-app"`. The base of the current image is non-conforming, and so its prefix is specifically unspecified (as `""`).
+
+There is an unknown number of non-conforming images between the conforming scratch and the conforming current images.
+
+### Summary
+
+The need to parse history and inspect output to determine image hierarchy and associate labels with images is not ideal, but there seems no other way to implement image-specific labels without support from the container specification itself. Doing so avoids the problems of stale image labels inherited by current images that don't over-write them, stops one image from overwriting labels from base or prior images that might be important, and allows for accumulative labels that span the whole image, such as licenses. It is relatively robust and not too difficult to implement, requiring two specific labels per container.
+
+## io.github.jefferysdockers Label Schema
+
+### Required prefixes
+
+All labels must be prefixed by the full reverse domain name for the image pull command, converting slashes to periods and leaving out a leading `com.dockerhub.` if needed. For example, if an image primary hosting is at 
+
+        dockerhub.com/jefferys/ubu-lts
+
+its prefix would be
+
+        jefferys.ubu-lts.
+
+Following the image prefix, images should be labeled by the reverse domain name of the schema where the labels are defined. This schema is defined at
+    
+        jefferysdockers.github.io
+
+so its labels are specified with a prefix of
+    
+        io.github.jefferysdockers.
+
+So in total, all labels from this schema in the above image would have a prefix of
+
+        jefferys.ubu-lts.io.github.jefferysdockers.
+
+Labels from other schema can be included in conforming containers, but must also have the image hosting prefix in addition to their domain specific labels, or even simple labels. For example other labels added to the image for some use cases might look like:
+
+        jefferys.ubu-lts.com.example.rating="10"
+        jefferys.ubu-lts.com.needs-mem="32G"
+
+It is permissible to add a simple label like `needs-mem="32G"` to an image for purely local use, but such labels should never be used on shared hosted images, and care must be taken by local users in labeling images used as the base for another.
+
+*Note:* Since there are required labels, and only conforming images should use the `io.github.jefferysdockers.` prefixes, it is always possible to parse the image name prefix preceding such a label, and hence user labels are can be parsed as well.
+
+### Required labels
+
+<ul>
+  <li><details>
+    <summary>**`io.github.JefferysDockers.base-prefix`** - Declares the prefix used in the base image. [...]</summary>
+
+By specifying the prefix the base image uses to identify *its* labels, image -> base image relationships can be deduced. Must be `"scratch"` if an image has no base, and must be `""` (the empty string) if the base image does not conform to the `io.github.JefferysDockers` labeling standard.
+
+**Examples:**
+
+        LABEL jefferys.ubu-lts.io.github.JefferysDockers.base-prefix="scratch"
+        
+        LABEL jefferys.bioc.io.github.JefferysDockers.base-prefix=""
+
+
+  </details></li>
+  <li><details>
+    <summary>**`io.github.JefferysDockers.label-schema-version`** - The version of the `io.github.JefferysDockers` labeling schema a conforming image uses. [...]</summary>
+
+Must be specified last in the Dockerfile or be followed only by LABEL statements. It may also be specified on the build command line using the `--label` option as those are added into the container at the end as `LABEL` instructions.
+
+**Examples:**
+
+        LABEL jefferys.ubu-lts.io.github.JefferysDockers.label-schema-version="0.0.1"
+        
+        docker build --label "jefferys.ubu-lts.io.github.JefferysDockers.label-schema-version=0.0.1"
+
+  </details></li>
+</ul>
+
+[TODO - CONTINUE FROM HERE]
+
+### Optional Labels
+
+[TODO - CONTINUE FROM HERE]
+
+### Example build script
+
+This is essentially the build.sh for the ubu-lts base Docker, with several
+optimizations to use with DockerHub's automated build environment, which
+includes the environmental variables:
+
+**`$DOCKER_REPO`** - The base name of the repo that will be pulling and building this
+**`$DOCKERFILE_PATH`** - The path to the Dockerfile, relative to the root of the build source repo.
+**`"TAG"`** - The name of the file containing the full version tag to use, as <toolVer>-<buildVer>
+
+In reality this will be in a file "hooks/build", the real build.sh in the repo just calls this script and provides values for the ENV variables above, if not specified
+
+~~~{class="bash"}
+###
+# Label input parameters
+###
+
+# Describing the image
+imageName="${DOCKER_REPO}"
+dockerfilePath="${DOCKERFILE_PATH}"
+spdxLicense=""
+licenseFile="https://ubuntu.com/licensing"
+baseImagePrefix="scratch"
+title="${imageName} - Base OS derived from Ubuntu."
+description="Based on Ubuntu this is a completely local build of a base Docker from scratch."
+keywords="Linux, Ubuntu, scratch, os"
+
+# Describing the image's content (the included Ubuntu distro)
+contentHome="https://wiki.ubuntu.com/Base"
+contentSource="http://cdimage.ubuntu.com/ubuntu-base/"
+contentTitle="Ubuntu base os distribution"
+contentDescription="Minimalist non-official functional distribution of Ubuntu, including apt-get"
+contentSpdxLicense=""
+contentLicenseFile="https://ubuntu.com/licensing"
+contentVendor="Canonical"
+contentVendorUrl="https://canonical.com/"
+
+# Independent of image and content
+labelSchemaVersion="0.0.1"
+vendor="UNC - Lineberger"
+vendorUrl="https://lbc.unc.edu/"
+
+# Constant across my dockers
+labelSchema="io.github.JefferysDockers"
+imageRepoOwner="jefferys"
+sourceRepoOwner="JefferysDockers"
+imageRepoRootUrl="https://hub.docker.com/r"
+sourceRepoRootUrl="https://github.com"
+maintainer="Stuart R. Jefferys <stuart_jefferys@med.unc.edu>"
+
+###
+# End of label input parameters
+###
+
+# Get tag for image, and parse into parts: the before first "-" part (the tool
+# version) and the after first "-" part (the build version).
+read TAG < "TAG"
+contentVersion="${TAG%%-*}"
+sourceVersion="${TAG#*-}"
+
+# Time created
+created="$(date "+%Y-%m-%dT%H:%M:%S%z")"
+afterPos=$(( ${#created} - 2 ))
+created="${created:0:${afterPos}}:${created:${afterPos}}"
+
+# Full label namespace with unique image id prepended
+NS="${imageRepoOwner}.${imageName}.${labelSchema}"
+
+###
+# Build command.
+###
+
+docker build \
+  --label "${NS}.base-prefix=${baseImagePrefix}" \
+  --label "${NS}.name=${imageName}" \
+  --label "${NS}.home=${imageRepoRootUrl}/${imageRepoOwner}/${imageName}" \
+  --label "${NS}.version=${TAG}" \
+  --label "${NS}.maintainer=${maintainer}" \
+  --label "${NS}.source-version=${sourceVersion}" \
+  --label "${NS}.source-home=${sourceRepoRootUrl}/${sourceRepoOwner}/${imageName}" \
+  --label "${NS}.source-maintainer=${maintainer}" \
+  --label "${NS}.pull=${imageRepoOwner}/${imageName}:$TAG" \
+  --label "${NS}.license-spdx=${spdxLicense}" \
+  --label "${NS}.license-file=${licenseFile}" \
+  --label "${NS}.vendor=${vendor}" \
+  --label "${NS}.vendorUrl=${vendorUrl}" \
+  --label "${NS}.title=${title}" \
+  --label "${NS}.description=${description}" \
+  --label "${NS}.content-home=${contentHome}" \
+  --label "${NS}.content-version=${contentVersion}" \
+  --label "${NS}.content-source=${contentSource}" \
+  --label "${NS}.content-license-spdx=${contentSpdxLicense}" \
+  --label "${NS}.content-license-file=${contentLicenseFile}" \
+  --label "${NS}.content-vendor=${contentVendor}" \
+  --label "${NS}.content-vendorUrl=${contentVendorUrl}" \
+  --label "${NS}.content-title=${contentTitle}" \
+  --label "${NS}.content-description=${contentDescription}" \
+  --label "${NS}.created=${created}" \
+  --label "${NS}.label-schema-version=${labelSchemaVersion}" \
+  --tag "${imageRepoOwner}/${imageName}:latest" \
+  --tag "${imageRepoOwner}/${imageName}:${contentVersion}" \
+  --tag "${imageRepoOwner}/${imageName}:${contentVersion}-${sourceVersion}" \
+  -f ${dockerfilePath} \
+  .
+~~~
